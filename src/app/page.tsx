@@ -100,6 +100,7 @@ export default function Home() {
                 id="email"
                 type="email"
                 placeholder="your.email@gmail.com"
+                autoComplete='email'
                 {...register('email')}
                 className={errors.email ? 'border-destructive' : ''}
                 aria-invalid={errors.email ? "true" : "false"}
