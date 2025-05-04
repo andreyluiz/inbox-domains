@@ -1,3 +1,6 @@
+import { ImapFlow } from 'imapflow';
+import type { Logger } from 'imapflow';
+
 /**
  * Represents the configuration needed to connect to an IMAP server.
  */
@@ -19,7 +22,7 @@ export interface ImapConfig {
    */
   username: string;
   /**
-   * The password for authentication.
+   * The password for authentication (use App Password for Gmail).
    */
   password: string;
 }
@@ -34,22 +37,101 @@ export interface Email {
   from: string;
 }
 
+// Optional: Custom logger to suppress verbose imapflow logs in production
+const imapLogger: Logger = ( TName, TLevel, ...rest ) => {
+    if (process.env.NODE_ENV !== 'production' || TLevel === 'error' || TLevel === 'warn') {
+        console.log( `[IMAP ${TLevel}]`, TName, ...rest );
+    }
+};
+
+
 /**
  * Asynchronously fetches emails from an IMAP server based on the provided configuration.
+ * Fetches the 'From' address of the last 500 emails in the INBOX.
  *
  * @param config The IMAP configuration.
  * @returns A promise that resolves to an array of Email objects.
+ * @throws Throws an error if connection, authentication, or fetching fails.
  */
 export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
-  // TODO: Implement this by calling an IMAP client library.
-  console.log('Fetching emails using config:', config);
+  const client = new ImapFlow({
+    host: config.host,
+    port: config.port,
+    secure: config.tls,
+    auth: {
+      user: config.username,
+      pass: config.password,
+    },
+    logger: imapLogger, // Use custom logger
+  });
 
-  // Stubbed data for demonstration
-  return [
-    { from: 'info@example.com' },
-    { from: 'newsletter@example.com' },
-    { from: 'info@promotions.example.com' },
-    { from: 'info@account.example.com' },
-    { from: 'support@otherdomain.com' },
-  ];
+  const emails: Email[] = [];
+
+  try {
+    console.log(`Attempting to connect to IMAP server ${config.host}...`);
+    await client.connect();
+    console.log("IMAP connection successful.");
+
+    try {
+      console.log("Opening INBOX...");
+      const lock = await client.getMailboxLock('INBOX');
+      try {
+        console.log("Fetching last 500 email UIDs...");
+        // Get sequence numbers of all messages, then slice the last 500
+        const messages = await client.search({ all: true }, { uid: true });
+        const last500Uids = messages.slice(-500); // Get the last 500 UIDs
+
+        if (last500Uids.length === 0) {
+          console.log("No emails found in INBOX.");
+          return [];
+        }
+
+        console.log(`Fetching 'FROM' header for ${last500Uids.length} emails...`);
+        // Fetch only the envelope data for the selected UIDs
+        const fetchGenerator = client.fetch(last500Uids.join(','), { envelope: true }, { uid: true });
+
+        for await (const msg of fetchGenerator) {
+          const fromAddress = msg.envelope?.from?.[0]?.address;
+          if (fromAddress) {
+            emails.push({ from: fromAddress });
+          } else {
+            console.warn(`Could not extract 'from' address for UID ${msg.uid}`);
+          }
+        }
+        console.log(`Successfully fetched 'FROM' for ${emails.length} emails.`);
+      } finally {
+        await lock.release();
+        console.log("INBOX lock released.");
+      }
+    } catch (mailboxError) {
+       console.error("Error accessing INBOX:", mailboxError);
+       throw new Error("Failed to access the INBOX. Please check permissions or folder name.");
+    }
+
+  } catch (err: any) {
+    console.error('IMAP operation failed:', err);
+    // Provide more specific error messages
+    if (err.code === 'AUTHENTICATIONFAILED' || err.response?.includes('AUTHENTICATIONFAILED')) {
+        throw new Error("Authentication failed. Please check your email address and App Password.");
+    } else if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
+        throw new Error(`Could not connect to the IMAP server (${config.host}). Please check the host and port, and your internet connection.`);
+    }
+    throw new Error(`An IMAP error occurred: ${err.message || 'Unknown error'}`);
+  } finally {
+    // Ensure logout happens even if errors occurred
+    if (client.usable) {
+      try {
+        console.log("Logging out from IMAP server...");
+        await client.logout();
+        console.log("IMAP logout successful.");
+      } catch (logoutErr) {
+        console.error("Error during IMAP logout:", logoutErr);
+        // Don't re-throw logout errors if already handling a primary error
+      }
+    } else {
+        console.log("IMAP client not usable, skipping logout.");
+    }
+  }
+
+  return emails;
 }
