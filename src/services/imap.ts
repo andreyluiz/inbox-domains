@@ -47,7 +47,7 @@ const imapLogger: Logger = ( TName, TLevel, ...rest ) => {
 
 /**
  * Asynchronously fetches emails from an IMAP server based on the provided configuration.
- * Fetches the 'From' address of the last 500 emails in the INBOX.
+ * Fetches the 'From' address of the last 5000 emails in the INBOX.
  *
  * @param config The IMAP configuration.
  * @returns A promise that resolves to an array of Email objects.
@@ -66,6 +66,7 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
   });
 
   const emails: Email[] = [];
+  const EMAIL_FETCH_LIMIT = 5000; // Increased limit
 
   try {
     console.log(`Attempting to connect to IMAP server ${config.host}...`);
@@ -76,28 +77,34 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
       console.log("Opening INBOX...");
       const lock = await client.getMailboxLock('INBOX');
       try {
-        console.log("Fetching last 500 email UIDs...");
-        // Get sequence numbers of all messages, then slice the last 500
+        console.log(`Fetching last ${EMAIL_FETCH_LIMIT} email UIDs...`);
+        // Get sequence numbers of all messages, then slice the last N
         const messages = await client.search({ all: true }, { uid: true });
-        const last500Uids = messages.slice(-500); // Get the last 500 UIDs
+        const lastUids = messages.slice(-EMAIL_FETCH_LIMIT); // Get the last N UIDs
 
-        if (last500Uids.length === 0) {
+        if (lastUids.length === 0) {
           console.log("No emails found in INBOX.");
           return [];
         }
 
-        console.log(`Fetching 'FROM' header for ${last500Uids.length} emails...`);
+        console.log(`Fetching 'FROM' header for ${lastUids.length} emails (limit: ${EMAIL_FETCH_LIMIT})... This might take a while.`);
         // Fetch only the envelope data for the selected UIDs
-        const fetchGenerator = client.fetch(last500Uids.join(','), { envelope: true }, { uid: true });
+        // Fetch in chunks to potentially avoid overwhelming the server/client
+        const CHUNK_SIZE = 500; // Process 500 emails at a time
+        for (let i = 0; i < lastUids.length; i += CHUNK_SIZE) {
+            const chunkUids = lastUids.slice(i, i + CHUNK_SIZE);
+             console.log(`Fetching chunk ${Math.floor(i / CHUNK_SIZE) + 1} of ${Math.ceil(lastUids.length / CHUNK_SIZE)} (UIDs ${chunkUids[0]}...${chunkUids[chunkUids.length - 1]})`);
+            const fetchGenerator = client.fetch(chunkUids.join(','), { envelope: true }, { uid: true });
 
-        for await (const msg of fetchGenerator) {
-          const fromAddress = msg.envelope?.from?.[0]?.address;
-          if (fromAddress) {
-            emails.push({ from: fromAddress });
-          } else {
-            console.warn(`Could not extract 'from' address for UID ${msg.uid}`);
-          }
-        }
+            for await (const msg of fetchGenerator) {
+              const fromAddress = msg.envelope?.from?.[0]?.address;
+              if (fromAddress) {
+                emails.push({ from: fromAddress });
+              } else {
+                console.warn(`Could not extract 'from' address for UID ${msg.uid}`);
+              }
+            }
+         }
         console.log(`Successfully fetched 'FROM' for ${emails.length} emails.`);
       } finally {
         await lock.release();

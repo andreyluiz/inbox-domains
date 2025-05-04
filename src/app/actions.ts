@@ -37,8 +37,8 @@ export async function getEmailDomains(emailAddress: string, appPassword: string)
 
   try {
     console.log(`[Server Action] Fetching emails for ${emailAddress}`);
-    emails = await fetchEmails(imapConfig);
-    console.log(`[Server Action] Fetched ${emails.length} email headers.`);
+    emails = await fetchEmails(imapConfig); // fetchEmails now fetches up to 5000
+    console.log(`[Server Action] Fetched ${emails.length} email headers (limit 5000).`);
 
     const counts: Record<string, number> = {};
     emails.forEach((email) => {

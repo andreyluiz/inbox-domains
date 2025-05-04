@@ -80,7 +80,7 @@ export default function Home() {
             <CardTitle className="text-2xl font-bold text-primary">Inbox Insights</CardTitle>
           </div>
           <CardDescription className="text-muted-foreground">
-            Connect to your Gmail account to discover the websites sending you the most email.
+            Connect to your Gmail account to discover the websites sending you the most email (analyzes last 5000 emails).
           </CardDescription>
         </CardHeader>
         <CardContent className="p-6 space-y-6">
@@ -143,7 +143,7 @@ export default function Home() {
 
           {isPending && !error && (
               <div className="flex justify-center items-center p-6 text-muted-foreground">
-                   <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Fetching and analyzing emails... this might take a minute.
+                   <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Fetching and analyzing emails... this might take a few minutes.
               </div>
           )}
 
@@ -173,7 +173,7 @@ export default function Home() {
               </ScrollArea>
             ) : (
               <div className="p-6 text-center text-muted-foreground">
-                No email data found or processed from the last 500 emails.
+                No email data found or processed from the last 5000 emails.
               </div>
             )
           )}
@@ -181,14 +181,14 @@ export default function Home() {
         {domainData && !error && domainData.domainCounts && domainData.domainCounts.length > 0 && (
            <CardFooter className="text-center border-t p-4 bg-secondary rounded-b-lg justify-center">
                 <CardDescription className="text-sm text-muted-foreground">
-                    Found emails from <strong className="text-accent">{domainData.domainCounts.length}</strong> unique websites in your last 500 emails.
+                    Found emails from <strong className="text-accent">{domainData.domainCounts.length}</strong> unique websites in your last 5000 emails.
                 </CardDescription>
            </CardFooter>
         )}
          {domainData && !error && domainData.domainCounts && domainData.domainCounts.length === 0 && (
              <CardFooter className="text-center border-t p-4 bg-secondary rounded-b-lg justify-center">
                  <CardDescription className="text-sm text-muted-foreground">
-                    No emails found from recognizable domains in your last 500 emails.
+                    No emails found from recognizable domains in your last 5000 emails.
                  </CardDescription>
             </CardFooter>
          )}
