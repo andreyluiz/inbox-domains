@@ -47,7 +47,8 @@ const imapLogger: Logger = ( TName, TLevel, ...rest ) => {
 
 /**
  * Asynchronously fetches emails from an IMAP server based on the provided configuration.
- * Fetches the 'From' address of the last 5000 emails in the INBOX.
+ * Fetches the 'From' address of the last 5000 emails *currently* in the INBOX.
+ * This inherently excludes archived emails because the search operates within the 'INBOX' mailbox context.
  *
  * @param config The IMAP configuration.
  * @returns A promise that resolves to an array of Email objects.
@@ -75,19 +76,21 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
 
     try {
       console.log("Opening INBOX...");
+      // Locking 'INBOX' ensures operations target only emails currently in the inbox.
       const lock = await client.getMailboxLock('INBOX');
       try {
-        console.log(`Fetching last ${EMAIL_FETCH_LIMIT} email UIDs...`);
-        // Get sequence numbers of all messages, then slice the last N
+        console.log(`Fetching last ${EMAIL_FETCH_LIMIT} email UIDs from INBOX...`);
+        // Get sequence numbers of all messages within the INBOX, then slice the last N.
+        // Searching with { all: true } within the locked INBOX finds emails currently residing there.
         const messages = await client.search({ all: true }, { uid: true });
-        const lastUids = messages.slice(-EMAIL_FETCH_LIMIT); // Get the last N UIDs
+        const lastUids = messages.slice(-EMAIL_FETCH_LIMIT); // Get the last N UIDs from the INBOX
 
         if (lastUids.length === 0) {
           console.log("No emails found in INBOX.");
           return [];
         }
 
-        console.log(`Fetching 'FROM' header for ${lastUids.length} emails (limit: ${EMAIL_FETCH_LIMIT})... This might take a while.`);
+        console.log(`Fetching 'FROM' header for ${lastUids.length} emails from INBOX (limit: ${EMAIL_FETCH_LIMIT})... This might take a while.`);
         // Fetch only the envelope data for the selected UIDs
         // Fetch in chunks to potentially avoid overwhelming the server/client
         const CHUNK_SIZE = 500; // Process 500 emails at a time
@@ -105,7 +108,7 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
               }
             }
          }
-        console.log(`Successfully fetched 'FROM' for ${emails.length} emails.`);
+        console.log(`Successfully fetched 'FROM' for ${emails.length} emails from INBOX.`);
       } finally {
         await lock.release();
         console.log("INBOX lock released.");
