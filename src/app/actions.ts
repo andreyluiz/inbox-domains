@@ -12,16 +12,17 @@ interface DomainCount {
 export interface DomainCountResult {
     domainCounts: DomainCount[] | null;
     error: string | null;
+    analyzedInboxOnly: boolean; // Keep track of the setting used for the analysis
 }
 
 // Server Action to fetch and process emails
-export async function getEmailDomains(emailAddress: string, appPassword: string): Promise<DomainCountResult> {
+export async function getEmailDomains(emailAddress: string, appPassword: string, onlyInbox: boolean): Promise<DomainCountResult> {
   // Basic validation for Gmail address
   if (!emailAddress || !emailAddress.endsWith('@gmail.com')) {
-     return { domainCounts: null, error: "Please provide a valid Gmail address." };
+     return { domainCounts: null, error: "Please provide a valid Gmail address.", analyzedInboxOnly: onlyInbox };
   }
    if (!appPassword) {
-       return { domainCounts: null, error: "App Password is required." };
+       return { domainCounts: null, error: "App Password is required.", analyzedInboxOnly: onlyInbox };
    }
 
   const imapConfig: ImapConfig = {
@@ -34,12 +35,13 @@ export async function getEmailDomains(emailAddress: string, appPassword: string)
 
   let emails: Email[] = [];
   let domainCounts: DomainCount[] = [];
+  const mailbox = onlyInbox ? 'INBOX' : '[Gmail]/All Mail'; // Choose mailbox based on parameter
 
   try {
-    console.log(`[Server Action] Fetching emails for ${emailAddress} from INBOX`);
-    // fetchEmails is configured to target the INBOX, so it only gets non-archived emails.
-    emails = await fetchEmails(imapConfig); // fetchEmails now fetches up to 5000 from INBOX
-    console.log(`[Server Action] Fetched ${emails.length} email headers from INBOX (limit 5000).`);
+    console.log(`[Server Action] Fetching emails for ${emailAddress} from ${mailbox} (Inbox Only: ${onlyInbox})`);
+    // Pass the onlyInbox flag to fetchEmails
+    emails = await fetchEmails(imapConfig, onlyInbox);
+    console.log(`[Server Action] Fetched ${emails.length} email headers from ${mailbox} (limit 5000).`);
 
     const counts: Record<string, number> = {};
     emails.forEach((email) => {
@@ -58,13 +60,13 @@ export async function getEmailDomains(emailAddress: string, appPassword: string)
       .map(([domain, count]) => ({ domain, count }))
       .sort((a, b) => b.count - a.count); // Sort by count descending
 
-    console.log(`[Server Action] Processed domains for ${emailAddress}. Found ${domainCounts.length} unique domains.`);
-    return { domainCounts, error: null };
+    console.log(`[Server Action] Processed domains for ${emailAddress}. Found ${domainCounts.length} unique domains from ${mailbox}.`);
+    return { domainCounts, error: null, analyzedInboxOnly: onlyInbox };
 
   } catch (err) {
-    console.error("[Server Action] Failed to fetch or process emails:", err);
+    console.error(`[Server Action] Failed to fetch or process emails from ${mailbox}:`, err);
     // Return the specific error message thrown by fetchEmails or a generic one
     const errorMessage = err instanceof Error ? err.message : "Could not retrieve or process email data.";
-    return { domainCounts: null, error: errorMessage };
+    return { domainCounts: null, error: errorMessage, analyzedInboxOnly: onlyInbox };
   }
 }

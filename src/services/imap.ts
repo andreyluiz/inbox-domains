@@ -39,7 +39,8 @@ export interface Email {
 
 // Optional: Custom logger to suppress verbose imapflow logs in production
 const imapLogger: Logger = ( TName, TLevel, ...rest ) => {
-    if (process.env.NODE_ENV !== 'production' || TLevel === 'error' || TLevel === 'warn') {
+    // Log errors and warnings always, other levels only in non-production
+    if (TLevel === 'error' || TLevel === 'warn' || process.env.NODE_ENV !== 'production') {
         console.log( `[IMAP ${TLevel}]`, TName, ...rest );
     }
 };
@@ -47,14 +48,14 @@ const imapLogger: Logger = ( TName, TLevel, ...rest ) => {
 
 /**
  * Asynchronously fetches emails from an IMAP server based on the provided configuration.
- * Fetches the 'From' address of the last 5000 emails *currently* in the INBOX.
- * This inherently excludes archived emails because the search operates within the 'INBOX' mailbox context.
+ * Fetches the 'From' address of the last 5000 emails from the specified mailbox.
  *
  * @param config The IMAP configuration.
+ * @param onlyInbox If true, fetches from 'INBOX'. If false, fetches from '[Gmail]/All Mail'.
  * @returns A promise that resolves to an array of Email objects.
  * @throws Throws an error if connection, authentication, or fetching fails.
  */
-export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
+export async function fetchEmails(config: ImapConfig, onlyInbox: boolean): Promise<Email[]> {
   const client = new ImapFlow({
     host: config.host,
     port: config.port,
@@ -67,7 +68,8 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
   });
 
   const emails: Email[] = [];
-  const EMAIL_FETCH_LIMIT = 5000; // Increased limit
+  const EMAIL_FETCH_LIMIT = 5000;
+  const mailbox = onlyInbox ? 'INBOX' : '[Gmail]/All Mail'; // Determine mailbox based on flag
 
   try {
     console.log(`Attempting to connect to IMAP server ${config.host}...`);
@@ -75,28 +77,25 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
     console.log("IMAP connection successful.");
 
     try {
-      console.log("Opening INBOX...");
-      // Locking 'INBOX' ensures operations target only emails currently in the inbox.
-      const lock = await client.getMailboxLock('INBOX');
+      console.log(`Opening mailbox: ${mailbox}...`);
+      const lock = await client.getMailboxLock(mailbox);
       try {
-        console.log(`Fetching last ${EMAIL_FETCH_LIMIT} email UIDs from INBOX...`);
-        // Get sequence numbers of all messages within the INBOX, then slice the last N.
-        // Searching with { all: true } within the locked INBOX finds emails currently residing there.
+        console.log(`Fetching last ${EMAIL_FETCH_LIMIT} email UIDs from ${mailbox}...`);
+        // Get sequence numbers of all messages within the selected mailbox, then slice the last N.
         const messages = await client.search({ all: true }, { uid: true });
-        const lastUids = messages.slice(-EMAIL_FETCH_LIMIT); // Get the last N UIDs from the INBOX
+        const lastUids = messages.slice(-EMAIL_FETCH_LIMIT); // Get the last N UIDs
 
         if (lastUids.length === 0) {
-          console.log("No emails found in INBOX.");
+          console.log(`No emails found in ${mailbox}.`);
           return [];
         }
 
-        console.log(`Fetching 'FROM' header for ${lastUids.length} emails from INBOX (limit: ${EMAIL_FETCH_LIMIT})... This might take a while.`);
+        console.log(`Fetching 'FROM' header for ${lastUids.length} emails from ${mailbox} (limit: ${EMAIL_FETCH_LIMIT})... This might take a while.`);
         // Fetch only the envelope data for the selected UIDs
-        // Fetch in chunks to potentially avoid overwhelming the server/client
-        const CHUNK_SIZE = 500; // Process 500 emails at a time
+        const CHUNK_SIZE = 500; // Process emails in chunks
         for (let i = 0; i < lastUids.length; i += CHUNK_SIZE) {
             const chunkUids = lastUids.slice(i, i + CHUNK_SIZE);
-             console.log(`Fetching chunk ${Math.floor(i / CHUNK_SIZE) + 1} of ${Math.ceil(lastUids.length / CHUNK_SIZE)} (UIDs ${chunkUids[0]}...${chunkUids[chunkUids.length - 1]})`);
+             console.log(`Fetching chunk ${Math.floor(i / CHUNK_SIZE) + 1} of ${Math.ceil(lastUids.length / CHUNK_SIZE)} from ${mailbox} (UIDs ${chunkUids[0]}...${chunkUids[chunkUids.length - 1]})`);
             const fetchGenerator = client.fetch(chunkUids.join(','), { envelope: true }, { uid: true });
 
             for await (const msg of fetchGenerator) {
@@ -104,18 +103,22 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
               if (fromAddress) {
                 emails.push({ from: fromAddress });
               } else {
-                console.warn(`Could not extract 'from' address for UID ${msg.uid}`);
+                console.warn(`Could not extract 'from' address for UID ${msg.uid} in ${mailbox}`);
               }
             }
          }
-        console.log(`Successfully fetched 'FROM' for ${emails.length} emails from INBOX.`);
+        console.log(`Successfully fetched 'FROM' for ${emails.length} emails from ${mailbox}.`);
       } finally {
         await lock.release();
-        console.log("INBOX lock released.");
+        console.log(`${mailbox} lock released.`);
       }
     } catch (mailboxError) {
-       console.error("Error accessing INBOX:", mailboxError);
-       throw new Error("Failed to access the INBOX. Please check permissions or folder name.");
+       console.error(`Error accessing mailbox ${mailbox}:`, mailboxError);
+       // Check if the error is related to a non-existent mailbox
+       if (mailboxError instanceof Error && mailboxError.message.toLowerCase().includes('no such mailbox')) {
+            throw new Error(`The mailbox "${mailbox}" does not exist or could not be selected. For Gmail, ensure '[Gmail]/All Mail' exists if trying to include archived emails.`);
+       }
+       throw new Error(`Failed to access the mailbox "${mailbox}". Please check permissions or folder name.`);
     }
 
   } catch (err: any) {
@@ -136,7 +139,6 @@ export async function fetchEmails(config: ImapConfig): Promise<Email[]> {
         console.log("IMAP logout successful.");
       } catch (logoutErr) {
         console.error("Error during IMAP logout:", logoutErr);
-        // Don't re-throw logout errors if already handling a primary error
       }
     } else {
         console.log("IMAP client not usable, skipping logout.");
