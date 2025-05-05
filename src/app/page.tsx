@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { ImapConfig } from '@/services/imap';
@@ -17,6 +18,12 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   Table,
   TableBody,
   TableCell,
@@ -31,7 +38,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Globe, Loader2, AlertTriangle, Info, Archive, Inbox } from 'lucide-react';
+import { Globe, Loader2, AlertTriangle, Info, Archive, Inbox, Mail } from 'lucide-react';
 import {
   Form,
   FormControl,
@@ -88,7 +95,7 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen flex-col items-center p-4 md:p-8 lg:p-12 bg-background">
-      <Card className="w-full max-w-2xl shadow-lg">
+      <Card className="w-full max-w-3xl shadow-lg"> {/* Increased max-width */}
         <CardHeader className="text-center bg-secondary rounded-t-lg p-6">
           <div className="flex justify-center items-center mb-2">
             <Globe className="w-8 h-8 text-primary mr-2" />
@@ -210,29 +217,54 @@ export default function Home() {
             domainData.domainCounts.length > 0 ? (
               <>
                 <p className="text-sm text-center text-muted-foreground pt-4">
-                  Showing results for emails analyzed <strong className="text-foreground">{analyzedScopeText}</strong>.
+                  Showing results for emails analyzed <strong className="text-foreground">{analyzedScopeText}</strong>. Click a domain to see the specific senders.
                 </p>
-                <ScrollArea className="h-[40vh] w-full border rounded-md mt-2">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
-                      <TableRow>
-                        <TableHead className="w-[70%] text-foreground font-semibold">Website Domain</TableHead>
-                        <TableHead className="text-right text-foreground font-semibold">Email Count</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {domainData.domainCounts.map(({ domain, count }) => (
-                        <TableRow key={domain} className="hover:bg-accent/10">
-                          <TableCell className="font-medium">{domain}</TableCell>
-                          <TableCell className="text-right">
-                            <Badge variant="secondary" className="bg-primary/10 text-primary">
-                              {count}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <ScrollArea className="h-[45vh] w-full border rounded-md mt-2"> {/* Increased height */}
+                    <Accordion type="single" collapsible className="w-full">
+                        {domainData.domainCounts.map(({ domain, count, emails }) => (
+                            <AccordionItem value={domain} key={domain}>
+                                <AccordionTrigger className="px-4 py-3 hover:bg-accent/10 transition-colors text-left">
+                                    <div className="flex justify-between items-center w-full">
+                                        <span className="font-medium text-foreground truncate mr-4 flex items-center">
+                                            <Globe className="w-4 h-4 mr-2 text-muted-foreground flex-shrink-0"/>
+                                            {domain}
+                                        </span>
+                                        <Badge variant="secondary" className="bg-primary/10 text-primary flex-shrink-0">
+                                            {count} total
+                                        </Badge>
+                                    </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="px-0 pt-0 pb-2 bg-muted/20">
+                                    {/* Nested Table for email breakdown */}
+                                    <div className="overflow-x-auto px-4 py-2">
+                                        <Table className="min-w-full">
+                                            <TableHeader>
+                                                <TableRow className="border-b-0">
+                                                    <TableHead className="text-xs font-semibold text-muted-foreground w-[80%]">Sender Email Address</TableHead>
+                                                    <TableHead className="text-right text-xs font-semibold text-muted-foreground">Count</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {emails.map(({ email, count: emailCount }) => (
+                                                    <TableRow key={email} className="border-b-0 hover:bg-accent/5">
+                                                        <TableCell className="text-sm text-foreground truncate py-1.5">
+                                                           <Mail className="w-3 h-3 mr-1.5 inline text-muted-foreground"/>
+                                                           {email}
+                                                        </TableCell>
+                                                        <TableCell className="text-right text-sm py-1.5">
+                                                            <Badge variant="outline" className="font-normal text-xs">
+                                                                {emailCount}
+                                                            </Badge>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                </AccordionContent>
+                            </AccordionItem>
+                        ))}
+                    </Accordion>
                 </ScrollArea>
               </>
             ) : (

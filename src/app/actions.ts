@@ -1,14 +1,24 @@
+
 'use server';
 
 import type { ImapConfig, Email } from '@/services/imap';
 import { fetchEmails } from '@/services/imap';
 import { getRootDomain } from '@/lib/domain-utils';
 
-interface DomainCount {
-  domain: string;
+// Represents the count for a specific email address within a domain
+interface EmailCount {
+  email: string;
   count: number;
 }
 
+// Represents the total count for a domain and the breakdown by email address
+interface DomainCount {
+  domain: string;
+  count: number; // Total count for the domain
+  emails: EmailCount[]; // Breakdown by specific email address
+}
+
+// Updated result structure
 export interface DomainCountResult {
     domainCounts: DomainCount[] | null;
     error: string | null;
@@ -34,7 +44,6 @@ export async function getEmailDomains(emailAddress: string, appPassword: string,
   };
 
   let emails: Email[] = [];
-  let domainCounts: DomainCount[] = [];
   const mailbox = onlyInbox ? 'INBOX' : '[Gmail]/All Mail'; // Choose mailbox based on parameter
 
   try {
@@ -43,25 +52,47 @@ export async function getEmailDomains(emailAddress: string, appPassword: string,
     emails = await fetchEmails(imapConfig, onlyInbox);
     console.log(`[Server Action] Fetched ${emails.length} email headers from ${mailbox} (limit 5000).`);
 
-    const counts: Record<string, number> = {};
+    // Structure to hold domain details including email breakdowns
+    const domainDetails: Record<string, { totalCount: number; emails: Record<string, number> }> = {};
+
     emails.forEach((email) => {
       // Added check for null/undefined email.from
       if (email && email.from) {
           const rootDomain = getRootDomain(email.from);
+          const fromAddress = email.from; // Keep the full address for breakdown
           if (rootDomain) {
-             counts[rootDomain] = (counts[rootDomain] || 0) + 1;
+             // Initialize domain entry if it doesn't exist
+             if (!domainDetails[rootDomain]) {
+               domainDetails[rootDomain] = { totalCount: 0, emails: {} };
+             }
+             // Increment total count for the domain
+             domainDetails[rootDomain].totalCount += 1;
+
+             // Initialize and increment count for the specific email address within the domain
+             if (!domainDetails[rootDomain].emails[fromAddress]) {
+               domainDetails[rootDomain].emails[fromAddress] = 0;
+             }
+             domainDetails[rootDomain].emails[fromAddress] += 1;
           }
       } else {
           console.warn("[Server Action] Encountered email with missing 'from' field.");
       }
     });
 
-    domainCounts = Object.entries(counts)
-      .map(([domain, count]) => ({ domain, count }))
-      .sort((a, b) => b.count - a.count); // Sort by count descending
+    // Transform domainDetails into sorted DomainCount array
+    const sortedDomainCounts: DomainCount[] = Object.entries(domainDetails)
+      .map(([domain, data]) => ({
+        domain,
+        count: data.totalCount,
+        // Sort emails within the domain by count descending
+        emails: Object.entries(data.emails)
+          .map(([email, count]) => ({ email, count }))
+          .sort((a, b) => b.count - a.count),
+      }))
+      .sort((a, b) => b.count - a.count); // Sort domains by total count descending
 
-    console.log(`[Server Action] Processed domains for ${emailAddress}. Found ${domainCounts.length} unique domains from ${mailbox}.`);
-    return { domainCounts, error: null, analyzedInboxOnly: onlyInbox };
+    console.log(`[Server Action] Processed domains for ${emailAddress}. Found ${sortedDomainCounts.length} unique domains from ${mailbox}.`);
+    return { domainCounts: sortedDomainCounts, error: null, analyzedInboxOnly: onlyInbox };
 
   } catch (err) {
     console.error(`[Server Action] Failed to fetch or process emails from ${mailbox}:`, err);
